@@ -65,3 +65,54 @@ Append-only log — chronological order, do not rewrite past entries.
   components. If a real multilingual need surfaces later, introducing
   `react-i18next` means extracting these strings — a mechanical, contained
   change (documented here so it isn't a surprise later).
+
+## 2026-09-24 — Hosting wired through the platform's pipeline contract
+
+- **Decision**: Add `/srv/team15/app/.gitlab-ci.yml` (install → lint/test/
+  audit/build-frontend → image-frontend → deploy → verify), run through
+  `gitlab-ci-local --force-shell-executor` per the Pipelines contract
+  (`app-builder-guidances/README.md`). Add static `GET /health` and
+  `GET /ready` endpoints to `frontend/nginx.conf` (both a trivial `200`,
+  since a dependency-free static app has nothing to check for readiness
+  beyond liveness) and a matching `healthcheck:` in `podman-compose.yml`,
+  per the Health checks contract.
+- **Context**: the frontend had only been build-checked locally
+  (`nginx -t`, a directory listing) — it had never actually run behind a
+  published port. Root cause: rootless Podman on this machine was missing
+  the `pasta` binary (package `passt`), so no container could publish a
+  port at all (`could not find pasta`). The core platform itself had never
+  been started on this box either (`podman ps` empty, all core ports free),
+  and its own `.internal` DNS was similarly broken — `aardvark-dns` was
+  also missing. Both packages were installed with the user's explicit
+  approval (`sudo apt-get install -y passt aardvark-dns`), confirmed with a
+  throwaway `podman run -p` test and a `getent hosts` test on
+  `core-network`, then the core platform's own pipeline
+  (`core-platform/core-platform/.gitlab-ci.yml`) was (re-)run to bring up
+  `core-network`, the registry, and the rest of the shared stack.
+- **Alternatives considered**: keeping verification at the `nginx -t`
+  level indefinitely — rejected, since the user explicitly asked to follow
+  the hosting guidelines, and a config that has never actually bound a port
+  is not "hosted". Copying the api/worker build+image jobs from the
+  template "for completeness" — rejected, `.gitlab-ci.yml` only has jobs
+  for what exists (`frontend`); `provision` is dropped too, since §0 KISS
+  still holds (no DB/S3/Vault dependency yet).
+- **Scoped gate gap**: the CCoE's mandatory pre-build gates (§13.3) include
+  `lint` (biome), `test`, `audit`, `secrets` (gitleaks). `biome` and
+  `gitleaks` are not installed on this machine, and installing gitleaks
+  wasn't covered by the user's sudo approval (scoped to `passt`), so:
+  `lint` runs `tsc --noEmit` only (no biome), `test` runs the existing
+  Vitest suite (already covers the `a11y-i18n` gate's a11y half via
+  `jest-axe`), `audit` runs `bun audit` (a real, blocking check — it
+  initially failed on 7 vulnerabilities in `vite`/`vitest`/`esbuild`, fixed
+  by `bun audit fix --latest`, which bumped `vitest` `^2.1.0` → `^4.1.11`;
+  re-verified 9/9 tests green after the bump), and `secrets` is **not**
+  included as a job — a documented gap, not a silent skip.
+- **Consequences**: `gitlab-ci-local --force-shell-executor` from
+  `/srv/team15/app` now does a real install → lint → test → audit → build →
+  image push (`localhost:5000/edition1-team15/frontend:dev`) → deploy →
+  verify cycle, and `curl http://localhost:8080/`,
+  `/health`, `/ready` all answer for real, from a container started by the
+  pipeline. `passt`/`aardvark-dns` being installed also unblocks any future
+  `api`/`worker` service (needs `.internal` DNS to reach
+  `postgres.internal` etc.) — not exercised by this batch, but no longer a
+  blocker when P1-2 needs it.

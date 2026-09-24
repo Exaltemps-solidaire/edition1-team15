@@ -22,12 +22,22 @@ bun run build     # build de production dans frontend/dist/
 bun run test      # suite Vitest
 ```
 
-Déploiement conteneurisé (une fois l'image construite) :
+Déploiement réel, via le pipeline de la plateforme (contrat Pipelines,
+`app-builder-guidances/README.md`) :
+
+```bash
+gitlab-ci-local --force-shell-executor
+# install → lint → test → audit → build → image (registry) → deploy → verify
+# expose le frontend sur http://localhost:8080 (seul port ouvert par
+# l'infra du hackathon pour le front, voir /srv/team15/CLAUDE.md — pas le
+# bloc générique de 10 ports ; la ligne 8080-8089 → trendforge-ccoe-demo du
+# contrat générique ne s'applique pas ici, cette machine ne l'héberge pas)
+```
+
+Repli manuel équivalent, une fois l'image déjà construite/poussée :
 
 ```bash
 APP=edition1-team15 podman compose -p "$APP" up -d
-# expose le frontend sur http://localhost:8080 (seul port ouvert par
-# l'infra du hackathon pour le front, voir /srv/team15/CLAUDE.md)
 ```
 
 ## Design vocabulary
@@ -72,8 +82,10 @@ ici, données statiques en attendant.
 
 ## Exposed interfaces
 
-Aucune — application frontend seule, pas de service `api/` dans ce lot (voir
-`adr.md`, décision KISS du 2026-09-24).
+Pas de service `api/` dans ce lot (voir `adr.md`, décision KISS du
+2026-09-24). Le frontend expose deux routes de contrôle (contrat Health
+checks) : `GET /health` (vivacité) et `GET /ready` (disponibilité) —
+identiques ici, `200` statique sans dépendance à vérifier.
 
 ## LLM FinOps
 
@@ -92,10 +104,13 @@ Sans objet.
 
 ## Structuring decisions
 
-Voir `adr.md` — trois décisions à ce jour : (1) lot P1-1 en frontend seul,
+Voir `adr.md` — quatre décisions à ce jour : (1) lot P1-1 en frontend seul,
 sans `api`/`worker`/BDD ; (2) thème `core` de la plateforme plutôt que la
 palette verte du prototype ; (3) français uniquement pour ce lot (exception
-KISS §7.5 pour un outil interne).
+KISS §7.5 pour un outil interne) ; (4) hébergement câblé via le pipeline de
+la plateforme (`.gitlab-ci.yml`, `/health`+`/ready`), avec les gates `biome`
+et `gitleaks` non exécutées ici faute d'outillage installé sur cette
+machine — gap documenté, pas un contournement silencieux.
 
 ## CCoE waivers
 

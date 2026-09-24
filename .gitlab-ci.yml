@@ -1,0 +1,130 @@
+# Adapted from core-platform/app-builder-guidances/templates/.gitlab-ci.yml
+# (CCOE-RULES.md §3.1). Trimmed to what this app actually has: `frontend`
+# only — §0 KISS still holds, no api/worker/DB/S3, so `provision` and the
+# api/worker build/image jobs are dropped rather than left as dead stages.
+#
+#   gitlab-ci-local --force-shell-executor                              # start
+#   gitlab-ci-local --force-shell-executor --variable ACTION=stop       # stop
+#   gitlab-ci-local --force-shell-executor --variable ACTION=purge      # purge
+#
+# Gates before build (CCOE-RULES §13.3) are scoped to what this machine can
+# actually run: `biome` and `gitleaks` are not installed here, so `lint` uses
+# `tsc --noEmit` only and the `secrets` gate is omitted rather than faked —
+# see adr.md for the documented gap.
+
+stages:
+  - app-install
+  - app-build
+  - app-image
+  - app-deploy
+  - app-verify
+  - app-stop
+  - app-purge
+
+variables:
+  APP: edition1-team15
+  TAG: dev
+  REGISTRY: localhost:5000
+  ACTION: start
+
+.on-start:
+  rules:
+    - if: $ACTION == "start"
+
+# ============================================================================
+# ACTION=start
+# `install` runs first, on its own: the app-build jobs below run in
+# parallel under gitlab-ci-local's shell executor and share one
+# frontend/node_modules on disk — a concurrent `bun install` from each of
+# them races and corrupts the linked packages (EEXIST). One install,
+# shared read-only by the parallel jobs, avoids that.
+# ============================================================================
+
+install:
+  extends: .on-start
+  stage: app-install
+  script:
+    - cd frontend
+    - bun install
+
+lint:
+  extends: .on-start
+  stage: app-build
+  script:
+    - cd frontend
+    - bunx tsc --noEmit
+
+test:
+  extends: .on-start
+  stage: app-build
+  script:
+    - cd frontend
+    - bun run test
+
+audit:
+  extends: .on-start
+  stage: app-build
+  script:
+    - cd frontend
+    - bun audit
+
+build-frontend:
+  extends: .on-start
+  stage: app-build
+  script:
+    - cd frontend
+    - bun run build
+
+image-frontend:
+  extends: .on-start
+  stage: app-image
+  script:
+    - podman build -t "$REGISTRY/$APP/frontend:$TAG" frontend/
+    - podman push   "$REGISTRY/$APP/frontend:$TAG"
+
+deploy:
+  extends: .on-start
+  stage: app-deploy
+  script:
+    - echo "[deploy] podman compose -p $APP up -d --force-recreate"
+    - podman compose -p "$APP" up -d --force-recreate
+
+verify:
+  extends: .on-start
+  stage: app-verify
+  script:
+    - |
+      set -e
+      echo "[verify] smoke test app"
+      ok=0
+      for _ in $(seq 1 30); do
+        if curl -sf http://localhost:8080/health >/dev/null && curl -sf http://localhost:8080/ >/dev/null; then
+          ok=1; break
+        fi
+        sleep 1
+      done
+      if [ "$ok" != "1" ]; then
+        echo "[verify] FAIL — frontend not reachable after 30s"
+        exit 1
+      fi
+      echo "  OK  frontend  http://localhost:8080/health"
+
+# ============================================================================
+# ACTION=stop / purge
+# ============================================================================
+
+stop:
+  stage: app-stop
+  rules:
+    - if: $ACTION == "stop"
+  script:
+    - echo "[stop] podman compose -p $APP down"
+    - podman compose -p "$APP" down
+
+purge:
+  stage: app-purge
+  rules:
+    - if: $ACTION == "purge"
+  script:
+    - echo "[purge] podman compose -p $APP down --volumes"
+    - podman compose -p "$APP" down --volumes
