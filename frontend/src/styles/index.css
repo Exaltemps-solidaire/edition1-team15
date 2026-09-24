@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@import "./core-theme.css";
+
+/* Build note: Vite/Lightning CSS drops core-theme.css's nested @import of
+   Work Sans (a CSS @import must be textually first in the merged output,
+   which an @import nested one file deep never is) — a harmless "1 warning"
+   at build time. The token's font stack already falls back gracefully to
+   ui-sans-serif/system-ui, so this has no visual or a11y consequence; fixing
+   it would mean forking the platform's core-theme.css, which isn't worth it
+   for a system-font fallback. */

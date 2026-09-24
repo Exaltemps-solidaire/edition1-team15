@@ -1,0 +1,25 @@
+# Adapted from core-platform/app-builder-guidances/templates/podman-compose.yml
+# (CCOE-RULES.md §2/§3). Only the `frontend` service exists for this batch
+# (P1-1): §0 KISS — no api/worker/Postgres/Valkey/S3, this slice has no real
+# backend dependency yet (mock data, see frontend/src/data/mock-home.ts).
+#
+# Ports: per /srv/team15/CLAUDE.md (this machine's infra override), only
+# 8080 (frontend) and 8081 (API, once it exists) are reachable — no 10-port
+# block.
+#
+# Standalone: APP=edition1-team15 podman compose -p "$APP" up -d
+
+name: ${APP}
+
+networks:
+  core-network:
+    external: true
+
+services:
+  frontend:
+    image: localhost:5000/${APP}/frontend:dev
+    container_name: ${APP}-frontend
+    restart: unless-stopped
+    networks: [core-network]
+    ports:
+      - "8080:80"
